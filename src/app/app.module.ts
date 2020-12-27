@@ -2,12 +2,12 @@ import { BrowserModule } from '@angular/platform-browser';
 import { NgModule } from '@angular/core';
 
 import { AppComponent } from './app.component';
-import { SpaceInvendorsComponent } from './space-invendors/space-invendors.component';
+import { SpaceInvadersComponent } from './space-Invaders/space-Invaders.component';
 
 @NgModule({
   declarations: [
     AppComponent,
-    SpaceInvendorsComponent
+    SpaceInvadersComponent
   ],
   imports: [
     BrowserModule

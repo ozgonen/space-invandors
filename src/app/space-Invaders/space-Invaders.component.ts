@@ -11,8 +11,8 @@ import {
   PLAYER_CLIP_RECT,
   SPRITE_SHEET_SRC,
   TEXT_BLINK_FREQ
-} from './space-invendors.consts';
-import {checkRectCollision, clamp, drawIntoCanvas, getRandomArbitrary} from './space-invendors.utils';
+} from './space-Invaders.consts';
+import {checkRectCollision, clamp, drawIntoCanvas, getRandomArbitrary} from './space-Invaders.utils';
 import {fromEvent, Subject} from 'rxjs';
 import {takeUntil} from 'rxjs/operators';
 import {Point2D} from './classes/point2-d';
@@ -390,11 +390,11 @@ export class Enemy extends SheetSprite {
 
 
 @Component({
-  selector: 'app-space-invendors',
-  templateUrl: './space-invendors.component.html',
-  styleUrls: ['./space-invendors.component.css']
+  selector: 'app-space-invaders',
+  templateUrl: './space-invaders.component.html',
+  styleUrls: ['./space-invaders.component.css']
 })
-export class SpaceInvendorsComponent implements AfterViewInit, OnDestroy {
+export class SpaceInvadersComponent implements AfterViewInit, OnDestroy {
 
   ngUnSubscribe: Subject<void> = new Subject<void>();
 
@@ -412,15 +412,21 @@ export class SpaceInvendorsComponent implements AfterViewInit, OnDestroy {
             break;
 
           case 'ArrowRight':
-            player.position.x += 20;
+            if (hasGameStarted) {
+              player.position.x += 20;
+
+            }
             break;
 
           case 'ArrowLeft':
-            player.position.x += -20;
+            if (hasGameStarted) {
+              player.position.x += -20;
+
+            }
             break;
 
           case 'KeyX':
-            if (player.bulletDelayAccumulator > 0.5) {
+            if (hasGameStarted && player.bulletDelayAccumulator > 0.5 ) {
               player.shoot();
               player.bulletDelayAccumulator = 0;
             }
@@ -657,7 +663,6 @@ export class SpaceInvendorsComponent implements AfterViewInit, OnDestroy {
     if (hasGameStarted) {
       this.updateGame(dt / 1000);
     }
-
 
     ctx.fillStyle = 'black';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
