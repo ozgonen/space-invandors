@@ -24,3 +24,12 @@ export function checkRectCollision(A, B): boolean {
   return xOverlap && yOverlap;
 }
 
+
+export function drawIntoCanvas(width, height, drawFunc): any {
+  const canvasDrawInto  = document.createElement('canvas');
+  canvasDrawInto.width  = width;
+  canvasDrawInto.height = height;
+  const ctxDraw         = canvasDrawInto.getContext('2d');
+  drawFunc(ctxDraw);
+  return canvasDrawInto;
+}

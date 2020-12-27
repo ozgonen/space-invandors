@@ -1,4 +1,4 @@
-import {Component} from '@angular/core';
+import {AfterViewInit, Component, OnDestroy} from '@angular/core';
 import {
   ALIEN_BOTTOM_ROW,
   ALIEN_MIDDLE_ROW,
@@ -6,16 +6,20 @@ import {
   ALIEN_TOP_ROW,
   ALIEN_X_MARGIN,
   CANVAS_HEIGHT,
-  CANVAS_WIDTH, IS_CHROME, LEFT_KEY, PLAYER_CLIP_RECT, RIGHT_KEY, SHOOT_KEY, SPRITE_SHEET_SRC, TEXT_BLINK_FREQ
+  CANVAS_WIDTH,
+  IS_CHROME,
+  PLAYER_CLIP_RECT,
+  SPRITE_SHEET_SRC,
+  TEXT_BLINK_FREQ
 } from './space-invendors.consts';
-import {checkRectCollision, clamp, getRandomArbitrary} from './space-invendors.utils';
+import {checkRectCollision, clamp, drawIntoCanvas, getRandomArbitrary} from './space-invendors.utils';
+import {fromEvent, Subject} from 'rxjs';
+import {takeUntil} from 'rxjs/operators';
 import {Point2D} from './classes/point2-d';
 import {Rect} from './classes/rect';
 
 export let ctx              = null;
 export let spriteSheetImg   = null;
-export let keyStates        = null;
-export let prevKeyStates    = null;
 export let bulletImg        = null;
 export let alienDirection   = -1;
 export let updateAlienLogic = false;
@@ -65,17 +69,11 @@ export function setupAlienFormation(): void {
   }
 }
 
-export function isKeyDown(key): any {
-  return keyStates[key];
-}
-
-export function wasKeyPressed(key): any {
-  return !prevKeyStates[key] && keyStates[key];
-}
 
 export class ParticleExplosion {
   particlePool;
   particles;
+
   constructor() {
     this.particlePool = [];
     this.particles    = [];
@@ -114,7 +112,7 @@ export class ParticleExplosion {
       const yunits  = Math.sin(radians) * speed;
 
       if (this.particlePool.length > 0) {
-        const tempParticle     = this.particlePool.pop();
+        const tempParticle   = this.particlePool.pop();
         tempParticle.x       = x;
         tempParticle.y       = y;
         tempParticle.xunits  = xunits;
@@ -235,6 +233,7 @@ export class Player extends SheetSprite {
   bullets;
   bulletDelayAccumulator;
   score;
+  position;
 
   constructor() {
     super(spriteSheetImg, PLAYER_CLIP_RECT, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 70);
@@ -244,6 +243,7 @@ export class Player extends SheetSprite {
     this.bullets                = [];
     this.bulletDelayAccumulator = 0;
     this.score                  = 0;
+    this.position.set(CANVAS_WIDTH / 2, CANVAS_HEIGHT - 70);
   }
 
   reset(): void {
@@ -257,22 +257,6 @@ export class Player extends SheetSprite {
     this.bullets.push(bullet);
   }
 
-  handleInput(): void {
-    if (isKeyDown(LEFT_KEY)) {
-      this.xVel = -175;
-    } else if (isKeyDown(RIGHT_KEY)) {
-      this.xVel = 175;
-    } else {
-      this.xVel = 0;
-    }
-
-    if (wasKeyPressed(SHOOT_KEY)) {
-      if (this.bulletDelayAccumulator > 0.5) {
-        this.shoot();
-        this.bulletDelayAccumulator = 0;
-      }
-    }
-  }
 
   updateBullets(dt): void {
     for (let i = this.bullets.length - 1; i >= 0; i--) {
@@ -290,8 +274,6 @@ export class Player extends SheetSprite {
     // update time passed between shots
     this.bulletDelayAccumulator += dt;
 
-    // apply x vel
-    this.position.x += this.xVel * dt;
 
     // cap player position in screen bounds
     this.position.x = clamp(this.position.x, this.bounds.w / 2, CANVAS_WIDTH - this.bounds.w / 2);
@@ -382,7 +364,6 @@ export class Enemy extends SheetSprite {
         reset();
       }
 
-      const fireTest = Math.floor(Math.random() * (this.stepDelay + 1));
       if (getRandomArbitrary(0, 1000) <= 5 * (this.stepDelay + 1)) {
         this.doShoot = true;
       }
@@ -413,283 +394,305 @@ export class Enemy extends SheetSprite {
   templateUrl: './space-invendors.component.html',
   styleUrls: ['./space-invendors.component.css']
 })
-export class SpaceInvendorsComponent {
+export class SpaceInvendorsComponent implements AfterViewInit, OnDestroy {
+
+  ngUnSubscribe: Subject<void> = new Subject<void>();
+
 
   constructor() {
+    fromEvent(document, 'keydown')
+      .pipe(takeUntil(this.ngUnSubscribe))
+      .subscribe((e: KeyboardEvent) => {
+        switch (e.code) {
+          case 'Enter':
+            if (!hasGameStarted) {
+              this.initGame();
+              hasGameStarted = true;
+            }
+            break;
 
+          case 'ArrowRight':
+            player.position.x += 20;
+            break;
+
+          case 'ArrowLeft':
+            player.position.x += -20;
+            break;
+
+          case 'KeyX':
+            if (player.bulletDelayAccumulator > 0.5) {
+              player.shoot();
+              player.bulletDelayAccumulator = 0;
+            }
+            break;
+
+          default:
+            break;
+        }
+      });
+  }
+
+  ngAfterViewInit(): void {
+    this.init();
+    this.animate();
+  }
+
+  ngOnDestroy(): void {
+    this.ngUnSubscribe.next();
+    this.ngUnSubscribe.complete();
+  }
 
 // ###################################################################
 // Initialization functions
 //
 // ###################################################################
-    function initCanvas(): void {
-      // create our canvas and context
-      canvas = document.getElementById('game-canvas');
-      ctx    = canvas.getContext('2d');
 
-      // turn off image smoothing
-      setImageSmoothing(false);
+  initCanvas(): void {
+    // create our canvas and context
+    canvas = document.getElementById('game-canvas');
+    ctx    = canvas.getContext('2d');
 
-      // create our main sprite sheet img
-      spriteSheetImg     = new Image();
-      spriteSheetImg.src = SPRITE_SHEET_SRC;
-      preDrawImages();
+    // turn off image smoothing
+    this.setImageSmoothing(false);
 
-      // add event listeners and initially resize
-      window.addEventListener('resize', resize);
-      document.addEventListener('keydown', onKeyDown);
-      document.addEventListener('keyup', onKeyUp);
-    }
+    // create our main sprite sheet img
+    spriteSheetImg     = new Image();
+    spriteSheetImg.src = SPRITE_SHEET_SRC;
+    this.preDrawImages();
 
-    function preDrawImages(): void {
-      const imgCanvas = drawIntoCanvas(2, 8, (tempCtx) => {
-        tempCtx.fillStyle = 'white';
-        tempCtx.fillRect(0, 0, tempCtx.canvas.width, tempCtx.canvas.height);
-      });
-      bulletImg       = new Image();
-      bulletImg.src   = imgCanvas.toDataURL();
-    }
+    // add event listeners and initially resize
+    window.addEventListener('resize', this.resize);
+  }
 
-    function setImageSmoothing(value): void {
-      ctx.imageSmoothingEnabled       = value;
-      ctx.mozImageSmoothingEnabled    = value;
-      ctx.oImageSmoothingEnabled      = value;
-      ctx.webkitImageSmoothingEnabled = value;
-      ctx.msImageSmoothingEnabled     = value;
-    }
 
-    function initGame(): void {
-      aliens          = [];
-      player          = new Player();
-      particleManager = new ParticleExplosion();
-      setupAlienFormation();
-      drawBottomHud();
-    }
+  preDrawImages(): void {
+    const imgCanvas = drawIntoCanvas(2, 8, (tempCtx) => {
+      tempCtx.fillStyle = 'white';
+      tempCtx.fillRect(0, 0, tempCtx.canvas.width, tempCtx.canvas.height);
+    });
+    bulletImg       = new Image();
+    bulletImg.src   = imgCanvas.toDataURL();
+  }
 
-    function init(): void {
-      initCanvas();
-      keyStates     = [];
-      prevKeyStates = [];
-      resize();
-    }
+
+  setImageSmoothing(value): void {
+    ctx.imageSmoothingEnabled       = value;
+    ctx.mozImageSmoothingEnabled    = value;
+    ctx.oImageSmoothingEnabled      = value;
+    ctx.webkitImageSmoothingEnabled = value;
+    ctx.msImageSmoothingEnabled     = value;
+  }
+
+
+  initGame(): void {
+    aliens          = [];
+    player          = new Player();
+    particleManager = new ParticleExplosion();
+    setupAlienFormation();
+    this.drawBottomHud();
+  }
+
+
+  init(): void {
+    this.initCanvas();
+    this.resize();
+  }
 
 
 // ###################################################################
 // Drawing & Update functions
 //
 // ###################################################################
-    function updateAliens(dt): void {
-      if (updateAlienLogic) {
-        updateAlienLogic = false;
-        alienDirection   = -alienDirection;
-        alienYDown       = 25;
-      }
 
-      for (let i = aliens.length - 1; i >= 0; i--) {
-        let alien = aliens[i];
-        if (!alien.alive) {
-          aliens.splice(i, 1);
-          alien = null;
-          alienCount--;
-          if (alienCount < 1) {
-            wave++;
-            setupAlienFormation();
-          }
-          return;
-        }
-
-        alien.stepDelay = ((alienCount * 20) - (wave * 10)) / 1000;
-        if (alien.stepDelay <= 0.05) {
-          alien.stepDelay = 0.05;
-        }
-        alien.update(dt);
-
-        if (alien.doShoot) {
-          alien.doShoot = false;
-          alien.shoot();
-        }
-      }
-      alienYDown = 0;
+  updateAliens(dt): void {
+    if (updateAlienLogic) {
+      updateAlienLogic = false;
+      alienDirection   = -alienDirection;
+      alienYDown       = 25;
     }
 
-    function resolveBulletEnemyCollisions(): void {
-      const bullets = player.bullets;
-
-      for (let i = 0, len = bullets.length; i < len; i++) {
-        const bullet = bullets[i];
-        for (let j = 0, alen = aliens.length; j < alen; j++) {
-          const alien = aliens[j];
-          if (checkRectCollision(bullet.bounds, alien.bounds)) {
-            alien.alive = bullet.alive = false;
-            particleManager.createExplosion(alien.position.x, alien.position.y, 'white', 70, 5, 5, 3, .15, 50);
-            player.score += 25;
-          }
+    for (let i = aliens.length - 1; i >= 0; i--) {
+      let alien = aliens[i];
+      if (!alien.alive) {
+        aliens.splice(i, 1);
+        alien = null;
+        alienCount--;
+        if (alienCount < 1) {
+          wave++;
+          setupAlienFormation();
         }
+        return;
+      }
+
+      alien.stepDelay = ((alienCount * 20) - (wave * 10)) / 1000;
+      if (alien.stepDelay <= 0.05) {
+        alien.stepDelay = 0.05;
+      }
+      alien.update(dt);
+
+      if (alien.doShoot) {
+        alien.doShoot = false;
+        alien.shoot();
       }
     }
+    alienYDown = 0;
+  }
 
-    function resolveBulletPlayerCollisions(): void {
-      for (let i = 0, len = aliens.length; i < len; i++) {
-        const alien = aliens[i];
-        if (alien.bullet !== null && checkRectCollision(alien.bullet.bounds, player.bounds)) {
-          if (player.lives === 0) {
-            hasGameStarted = false;
-          } else {
-            alien.bullet.alive = false;
-            particleManager.createExplosion(player.position.x, player.position.y, 'green', 100, 8, 8, 6, 0.001, 40);
-            player.position.set(CANVAS_WIDTH / 2, CANVAS_HEIGHT - 70);
-            player.lives--;
-            break;
-          }
 
+  resolveBulletEnemyCollisions(): void {
+    const bullets = player.bullets;
+
+    for (let i = 0, len = bullets.length; i < len; i++) {
+      const bullet = bullets[i];
+      for (let j = 0, alen = aliens.length; j < alen; j++) {
+        const alien = aliens[j];
+        if (checkRectCollision(bullet.bounds, alien.bounds)) {
+          alien.alive = bullet.alive = false;
+          particleManager.createExplosion(alien.position.x, alien.position.y, 'white', 70, 5, 5, 3, .15, 50);
+          player.score += 25;
         }
       }
     }
+  }
 
-    function resolveCollisions(): void {
-      resolveBulletEnemyCollisions();
-      resolveBulletPlayerCollisions();
-    }
 
-    function updateGame(dt): void {
-      player.handleInput();
-      prevKeyStates = keyStates.slice();
-      player.update(dt);
-      updateAliens(dt);
-      resolveCollisions();
-    }
+  resolveBulletPlayerCollisions(): void {
+    for (let i = 0, len = aliens.length; i < len; i++) {
+      const alien = aliens[i];
+      if (alien.bullet !== null && checkRectCollision(alien.bullet.bounds, player.bounds)) {
+        if (player.lives === 0) {
+          hasGameStarted = false;
+        } else {
+          alien.bullet.alive = false;
+          particleManager.createExplosion(player.position.x, player.position.y, 'green', 100, 8, 8, 6, 0.001, 40);
+          player.position.set(CANVAS_WIDTH / 2, CANVAS_HEIGHT - 70);
+          player.lives--;
+          break;
+        }
 
-    function drawIntoCanvas(width, height, drawFunc): any {
-      const canvasDrawInto  = document.createElement('canvas');
-      canvasDrawInto.width  = width;
-      canvasDrawInto.height = height;
-      const ctxDraw         = canvasDrawInto.getContext('2d');
-      drawFunc(ctxDraw);
-      return canvasDrawInto;
-    }
-
-    function fillText(text, x, y, color = null, fontSize = null): void {
-      if (typeof color !== 'undefined') {
-        ctx.fillStyle = color;
-      }
-      if (typeof fontSize !== 'undefined') {
-        ctx.font = fontSize + 'px Play';
-      }
-      ctx.fillText(text, x, y);
-    }
-
-    function fillCenteredText(text, x, y, color = null, fontSize = null): void {
-      const metrics = ctx.measureText(text);
-      fillText(text, x - metrics.width / 2, y, color, fontSize);
-    }
-
-    function fillBlinkingText(text, x, y, blinkFreq, color = null, fontSize = null): void {
-      if (Math.floor(0.5 + Date.now() / blinkFreq) % 2) {
-        fillCenteredText(text, x, y, color, fontSize);
       }
     }
+  }
 
-    function drawBottomHud(): void {
-      ctx.fillStyle = '#02ff12';
-      ctx.fillRect(0, CANVAS_HEIGHT - 30, CANVAS_WIDTH, 2);
-      fillText(player.lives + ' x ', 10, CANVAS_HEIGHT - 7.5, 'white', 20);
-      ctx.drawImage(spriteSheetImg, player.clipRect.x, player.clipRect.y, player.clipRect.w,
-        player.clipRect.h, 45, CANVAS_HEIGHT - 23, player.clipRect.w * 0.5,
-        player.clipRect.h * 0.5);
-      fillText('CREDIT: ', CANVAS_WIDTH - 115, CANVAS_HEIGHT - 7.5);
-      fillCenteredText('SCORE: ' + player.score, CANVAS_WIDTH / 2, 20);
-      fillBlinkingText('00', CANVAS_WIDTH - 25, CANVAS_HEIGHT - 7.5, TEXT_BLINK_FREQ);
+
+  resolveCollisions(): void {
+    this.resolveBulletEnemyCollisions();
+    this.resolveBulletPlayerCollisions();
+  }
+
+
+  updateGame(dt): void {
+    player.update(dt);
+    this.updateAliens(dt);
+    this.resolveCollisions();
+  }
+
+
+  fillText(text, x, y, color = null, fontSize = null): void {
+    if (typeof color !== 'undefined') {
+      ctx.fillStyle = color;
+    }
+    if (typeof fontSize !== 'undefined') {
+      ctx.font = fontSize + 'px Play';
+    }
+    ctx.fillText(text, x, y);
+  }
+
+
+  fillCenteredText(text, x, y, color = null, fontSize = null): void {
+    const metrics = ctx.measureText(text);
+    this.fillText(text, x - metrics.width / 2, y, color, fontSize);
+  }
+
+
+  fillBlinkingText(text, x, y, blinkFreq, color = null, fontSize = null): void {
+    if (Math.floor(0.5 + Date.now() / blinkFreq) % 2) {
+      this.fillCenteredText(text, x, y, color, fontSize);
+    }
+  }
+
+
+  drawBottomHud(): void {
+    ctx.fillStyle = '#02ff12';
+    ctx.fillRect(0, CANVAS_HEIGHT - 30, CANVAS_WIDTH, 2);
+    this.fillText(player.lives + ' x ', 10, CANVAS_HEIGHT - 7.5, 'white', 20);
+    ctx.drawImage(spriteSheetImg, player.clipRect.x, player.clipRect.y, player.clipRect.w,
+      player.clipRect.h, 45, CANVAS_HEIGHT - 23, player.clipRect.w * 0.5,
+      player.clipRect.h * 0.5);
+    this.fillText('CREDIT: ', CANVAS_WIDTH - 115, CANVAS_HEIGHT - 7.5);
+    this.fillCenteredText('SCORE: ' + player.score, CANVAS_WIDTH / 2, 20);
+    this.fillBlinkingText('00', CANVAS_WIDTH - 25, CANVAS_HEIGHT - 7.5, TEXT_BLINK_FREQ);
+  }
+
+
+  drawAliens(resized): void {
+    aliens.forEach(tempAlien => {
+      tempAlien.draw(resized);
+    });
+  }
+
+
+  drawGame(resized): void {
+    player.draw(resized);
+    this.drawAliens(resized);
+    particleManager.draw();
+    this.drawBottomHud();
+  }
+
+
+  drawStartScreen(): void {
+    this.fillCenteredText('Space Invaders', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2.75, '#FFFFFF', 36);
+    this.fillBlinkingText('Press enter to play!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, 500, '#FFFFFF', 36);
+  }
+
+
+  animate(): void {
+
+    const now = window.performance.now();
+    let dt    = now - lastTime;
+    if (dt > 100) {
+      dt = 100;
     }
 
-    function drawAliens(resized): void {
-      aliens.forEach(tempAlien => {
-        tempAlien.draw(resized);
-      });
+    if (hasGameStarted) {
+      this.updateGame(dt / 1000);
     }
 
-    function drawGame(resized): void {
-      player.draw(resized);
-      drawAliens(resized);
-      particleManager.draw();
-      drawBottomHud();
+
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    if (hasGameStarted) {
+      this.drawGame(false);
+    } else {
+      this.drawStartScreen();
     }
-
-    function drawStartScreen(): void {
-      fillCenteredText('Space Invaders', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2.75, '#FFFFFF', 36);
-      fillBlinkingText('Press enter to play!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, 500, '#FFFFFF', 36);
-    }
-
-    function animate(): void {
-      const now = window.performance.now();
-      let dt    = now - lastTime;
-      if (dt > 100) {
-        dt = 100;
-      }
-      if (wasKeyPressed(13) && !hasGameStarted) {
-        initGame();
-        hasGameStarted = true;
-      }
-
-      if (hasGameStarted) {
-        updateGame(dt / 1000);
-      }
-
-
-      ctx.fillStyle = 'black';
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      if (hasGameStarted) {
-        drawGame(false);
-      } else {
-        drawStartScreen();
-      }
-      lastTime = now;
-      requestAnimationFrame(animate);
-    }
+    lastTime = now;
+    window.requestAnimationFrame(this.animate.bind(this));
+  }
 
 
 // ###################################################################
 // Event Listener functions
 //
 // ###################################################################
-    function resize(): void {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
 
-      // calculate the scale factor to keep a correct aspect ratio
-      const scaleFactor = Math.min(w / CANVAS_WIDTH, h / CANVAS_HEIGHT);
+  resize(): void {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
 
-      if (IS_CHROME) {
-        canvas.width  = CANVAS_WIDTH * scaleFactor;
-        canvas.height = CANVAS_HEIGHT * scaleFactor;
-        setImageSmoothing(false);
-        ctx.transform(scaleFactor, 0, 0, scaleFactor, 0, 0);
-      } else {
-        // resize the canvas css properties
-        canvas.style.width  = CANVAS_WIDTH * scaleFactor + 'px';
-        canvas.style.height = CANVAS_HEIGHT * scaleFactor + 'px';
-      }
+    // calculate the scale factor to keep a correct aspect ratio
+    const scaleFactor = Math.min(w / CANVAS_WIDTH, h / CANVAS_HEIGHT);
+
+    if (IS_CHROME) {
+      canvas.width  = CANVAS_WIDTH * scaleFactor;
+      canvas.height = CANVAS_HEIGHT * scaleFactor;
+      this.setImageSmoothing(false);
+      ctx.transform(scaleFactor, 0, 0, scaleFactor, 0, 0);
+    } else {
+      // resize the canvas css properties
+      canvas.style.width  = CANVAS_WIDTH * scaleFactor + 'px';
+      canvas.style.height = CANVAS_HEIGHT * scaleFactor + 'px';
     }
-
-    function onKeyDown(e): void {
-      e.preventDefault();
-      keyStates[e.keyCode] = true;
-    }
-
-    function onKeyUp(e): void {
-      e.preventDefault();
-      keyStates[e.keyCode] = false;
-    }
-
-
-// ###################################################################
-// Start game!
-//
-// ###################################################################
-
-    window.onload = () => {
-      init();
-      animate();
-    };
   }
 
 
